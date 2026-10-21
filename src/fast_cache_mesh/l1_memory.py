@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import threading
 import time
 from typing import Any, Optional, Tuple
 
@@ -8,34 +9,39 @@ class L1MemoryCache:
 
     def __init__(self, maxsize: int = 1000):
         self.maxsize = maxsize
+        self._lock = threading.RLock()
         self._cache: OrderedDict[str, Tuple[Any, float]] = OrderedDict()
 
     def get(self, key: str) -> Tuple[bool, Any]:
-        if key not in self._cache:
-            return False, None
+        with self._lock:
+            if key not in self._cache:
+                return False, None
 
-        val, exp = self._cache[key]
-        if exp is not None and time.time() > exp:
-            del self._cache[key]
-            return False, None
+            val, exp = self._cache[key]
+            if exp is not None and time.time() > exp:
+                del self._cache[key]
+                return False, None
 
-        # Move to end (most recently used)
-        self._cache.move_to_end(key)
-        return True, val
+            # Move to end (most recently used)
+            self._cache.move_to_end(key)
+            return True, val
 
     def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
-        exp = (time.time() + ttl) if ttl else None
+        with self._lock:
+            exp = (time.time() + ttl) if ttl else None
 
-        if key in self._cache:
-            self._cache.move_to_end(key)
-        self._cache[key] = (value, exp)
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = (value, exp)
 
-        if len(self._cache) > self.maxsize:
-            # Evict least recently used (first item)
-            self._cache.popitem(last=False)
+            if len(self._cache) > self.maxsize:
+                # Evict least recently used (first item)
+                self._cache.popitem(last=False)
 
     def delete(self, key: str) -> None:
-        self._cache.pop(key, None)
+        with self._lock:
+            self._cache.pop(key, None)
 
     def clear(self) -> None:
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
